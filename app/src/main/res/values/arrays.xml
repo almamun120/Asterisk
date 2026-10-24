@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DTMF Modes -->
+    <string-array name="dtmf_modes">
+        <item>RFC 2833 (Recommended)</item>
+        <item>Inband</item>
+        <item>SIP INFO</item>
+        <item>Auto</item>
+    </string-array>
+
+    <!-- SIP Transports -->
+    <string-array name="sip_transports">
+        <item>UDP</item>
+        <item>TCP</item>
+        <item>UDP + TCP</item>
+        <item>TLS</item>
+    </string-array>
+
+    <!-- Video Resolutions -->
+    <string-array name="video_resolutions">
+        <item>1080p (1920x1080)</item>
+        <item>720p (1280x720)</item>
+        <item>480p (854x480)</item>
+        <item>360p (640x360)</item>
+    </string-array>
+
+    <!-- Recording Formats -->
+    <string-array name="recording_formats">
+        <item>WAV (Uncompressed)</item>
+        <item>MP3 (Compressed)</item>
+        <item>GSM (Low Quality)</item>
+    </string-array>
+
+    <!-- Queue Strategies -->
+    <string-array name="queue_strategies">
+        <item>Ring All (Simultaneous)</item>
+        <item>Least Recent</item>
+        <item>Fewest Calls</item>
+        <item>Random</item>
+        <item>Round Robin Memory</item>
+    </string-array>
+
+    <!-- Log Levels -->
+    <string-array name="log_levels">
+        <item>Debug (Verbose)</item>
+        <item>Info (Normal)</item>
+        <item>Warning (Important)</item>
+        <item>Error (Critical Only)</item>
+    </string-array>
+
+    <!-- Media routing -->
+    <string-array name="media_modes">
+        <item>Auto (direct on same network, relay otherwise)</item>
+        <item>Relay (always through server)</item>
+        <item>Direct (device to device)</item>
+    </string-array>
+
+    <!-- Theme -->
+    <string-array name="theme_modes">
+        <item>Follow system</item>
+        <item>Light</item>
+        <item>Dark</item>
+    </string-array>
+</resources>

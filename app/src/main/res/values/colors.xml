@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <color name="primary">#4F46E5</color>
+    <color name="primary_dark">#3730A3</color>
+    <color name="accent">#0EA5E9</color>
+    <color name="primary_container">#E0E7FF</color>
+    <color name="on_primary_container">#1E1B4B</color>
+
+    <!-- Surfaces / text -->
+    <color name="surface_bg">#F4F5FA</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="text_primary">#111827</color>
+    <color name="text_secondary">#6B7280</color>
+    <color name="divider">#E5E7EB</color>
+
+    <!-- Status -->
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="green">#16A34A</color>
+    <color name="red">#DC2626</color>
+    <color name="amber">#D97706</color>
+    <color name="green_container">#DCFCE7</color>
+    <color name="red_container">#FEE2E2</color>
+    <color name="amber_container">#FEF3C7</color>
+
+    <!-- Console (always dark) -->
+    <color name="log_error">#FF6B6B</color>
+    <color name="log_warning">#FFB74D</color>
+    <color name="log_info">#4ADE80</color>
+    <color name="log_debug">#60A5FA</color>
+    <color name="log_verbose">#9CA3AF</color>
+    <color name="console_bg">#0B1020</color>
+    <color name="console_header">#151C30</color>
+    <color name="console_text_dim">#94A3B8</color>
+</resources>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/dashboardFragment">
+
+    <fragment
+        android:id="@+id/dashboardFragment"
+        android:name="com.asterisk.voip.ui.dashboard.DashboardFragment"
+        android:label="Dashboard" />
+
+    <fragment
+        android:id="@+id/extensionsFragment"
+        android:name="com.asterisk.voip.ui.extensions.ExtensionsFragment"
+        android:label="Extensions" />
+
+    <fragment
+        android:id="@+id/dialPlanFragment"
+        android:name="com.asterisk.voip.ui.dialplan.DialPlanFragment"
+        android:label="Dial Plan" />
+
+    <fragment
+        android:id="@+id/consoleFragment"
+        android:name="com.asterisk.voip.ui.console.ConsoleFragment"
+        android:label="Console" />
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.asterisk.voip.ui.settings.SettingsFragment"
+        android:label="Settings" />
+
+</navigation>

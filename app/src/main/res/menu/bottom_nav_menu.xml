@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/dashboardFragment"
+        android:icon="@drawable/ic_dashboard"
+        android:title="Dashboard" />
+
+    <item
+        android:id="@+id/extensionsFragment"
+        android:icon="@drawable/ic_extensions"
+        android:title="Extensions" />
+
+    <item
+        android:id="@+id/dialPlanFragment"
+        android:icon="@drawable/ic_dialplan"
+        android:title="Dial Plan" />
+
+    <item
+        android:id="@+id/consoleFragment"
+        android:icon="@drawable/ic_console"
+        android:title="Console" />
+
+    <item
+        android:id="@+id/settingsFragment"
+        android:icon="@drawable/ic_settings"
+        android:title="Settings" />
+
+</menu>

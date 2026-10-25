@@ -14,6 +14,9 @@ interface DialPlanRuleDao {
     @Query("SELECT * FROM dialplan_rules WHERE enabled = 1 ORDER BY priority ASC")
     fun getEnabledRules(): Flow<List<DialPlanRule>>
 
+    @Query("SELECT * FROM dialplan_rules WHERE enabled = 1 ORDER BY priority ASC")
+    suspend fun getEnabledRulesNow(): List<DialPlanRule>
+
     @Query("SELECT * FROM dialplan_rules WHERE `condition` = :condition AND enabled = 1 ORDER BY priority ASC")
     suspend fun getRulesByCondition(condition: DialPlanCondition): List<DialPlanRule>
 

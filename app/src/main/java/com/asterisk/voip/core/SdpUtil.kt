@@ -17,6 +17,7 @@ object SdpUtil {
         val connIp: String?,
         val rtcpPort: Int?
     ) {
+        val isMsrp get() = proto.uppercase().contains("MSRP")
         val rejected get() = port == 0
         val relayable get() = !rejected && isRelayableProto(proto)
         val effectiveRtcpPort get() = rtcpPort ?: (port + 1)
@@ -114,6 +115,9 @@ object SdpUtil {
                 }
                 val tail = parts.drop(3).joinToString(" ")
                 val disabledVideo = m.type.equals("video", true) && !videoEnabled
+                if (m.isMsrp && !m.rejected) { // MSRP is handled by MsrpManager, keep the section intact
+                    out.append(line).append("\r\n"); continue
+                }
                 val ports = if (m.relayable && !disabledVideo) portsFor(m) else null
                 if (m.rejected) {
                     out.append(line).append("\r\n")
@@ -139,6 +143,8 @@ object SdpUtil {
         }
         return out.toString()
     }
+
+    fun hasMsrp(sdp: String) = parseMedia(sdp).any { it.isMsrp && !it.rejected }
 
     /** Removes a=candidate etc. is NOT done here: direct mode keeps the SDP untouched. */
     fun hasVideo(sdp: String) = parseMedia(sdp).any { it.type.equals("video", true) && !it.rejected }

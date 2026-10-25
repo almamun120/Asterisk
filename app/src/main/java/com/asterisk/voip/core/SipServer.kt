@@ -30,9 +30,9 @@ class SipServer(
 ) {
     companion object {
         const val REALM = "asterisk"
-        private const val BRANCH_PREFIX = "z9hG4bKsv"
+        internal const val BRANCH_PREFIX = "z9hG4bKsv"
         private const val FAILED_LINGER_MS = 32_000L
-        private const val RING_TIMEOUT_MS = 120_000L
+        internal const val RING_TIMEOUT_MS = 120_000L
     }
 
     // ------------------------------------------------------------ state
@@ -50,13 +50,13 @@ class SipServer(
     class Call(
         val id: String,
         val fromExt: String,
-        val toExt: String,
+        var toExt: String,
         val callerTag: String?,
         val callerIp: String,
         val callerPort: Int,
-        val calleeIp: String,
-        val calleePort: Int,
-        val relayed: Boolean,
+        var calleeIp: String,
+        var calleePort: Int,
+        var relayed: Boolean,
         val invite: SipMessage,
         val time: Long = System.currentTimeMillis()
     ) {
@@ -65,6 +65,11 @@ class SipServer(
         @Volatile var endedAt = 0L
         @Volatile var video = false
         @Volatile var inviteCSeq = 0
+        @Volatile var attemptAt = System.currentTimeMillis()
+        @Volatile var ringTimeoutMs = RING_TIMEOUT_MS
+        @Volatile var fork = 0
+        @Volatile var branch = ""
+        @Volatile var fwdUri = ""
     }
 
     private class TcpConn(val socket: Socket) {
@@ -76,7 +81,7 @@ class SipServer(
     private var tcpServer: ServerSocket? = null
     private val tcpConns = ConcurrentHashMap<String, TcpConn>()
     @Volatile private var running = false
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val serverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val registered = ConcurrentHashMap<String, Client>()
     private val calls = ConcurrentHashMap<String, Call>()
@@ -90,6 +95,30 @@ class SipServer(
     private val banned = ConcurrentHashMap<String, Long>()
 
     private var dialPlanExecutor: DialPlanExecutor? = null
+    private val legs = LegManager(this)
+    private var msrp: MsrpManager? = null
+
+    // accessors for LegManager / MsrpManager (same module)
+    internal val config: ServerConfig get() = cfg
+    internal val sipPortNow: Int get() = sipPort
+    internal val branchPrefix: String get() = BRANCH_PREFIX
+    internal val registeredMap: ConcurrentHashMap<String, Client> get() = registered
+    internal val callMap: ConcurrentHashMap<String, Call> get() = calls
+    internal val executor: DialPlanExecutor? get() = dialPlanExecutor
+    internal val prompts: VoicePromptManager? get() = voicePromptManager
+    internal val legManager: LegManager get() = legs
+    internal val repo: AsteriskRepository get() = repository
+    @Volatile internal var storageDir: java.io.File = java.io.File("/data/local/tmp")
+    internal suspend fun queueText(fromExt: String, toExt: String, contentType: String, text: String) =
+        storeOfflineMessage(fromExt, toExt, contentType, text)
+    internal val scope: CoroutineScope get() = this.serverScope
+    internal fun slog(tag: String, msg: String) = log(tag, msg)
+    internal fun send(bytes: ByteArray, ip: String, port: Int) = sendBytes(bytes, ip, port)
+    internal fun ownIp(peerIp: String) = ownIpFor(peerIp)
+    internal fun transport(ip: String, port: Int) = transportFor(ip, port)
+    internal fun makeReply(req: SipMessage, code: Int, reason: String, ip: String, port: Int, vararg extra: Pair<String, String>): SipMessage =
+        buildReply(req, code, reason, ip, port, *extra)
+    internal fun sendReply(req: SipMessage, code: Int, reason: String, ip: String, port: Int) = reply(req, code, reason, ip, port)
     private var voicePromptManager: VoicePromptManager? = null
 
     // ------------------------------------------------------------ lifecycle
@@ -97,10 +126,12 @@ class SipServer(
     fun configure(config: ServerConfig) {
         cfg = config
         sipPort = config.sipPort
+        dialPlanExecutor?.configure(config)
     }
 
-    fun initializeDialPlan(executor: DialPlanExecutor, promptManager: VoicePromptManager) {
+    fun initializeDialPlan(executor: DialPlanExecutor, promptManager: VoicePromptManager, storage: java.io.File) {
         dialPlanExecutor = executor
+        storageDir = storage
         voicePromptManager = promptManager
         log("DIALPLAN", "✓ Dial plan executor initialized")
     }
@@ -135,6 +166,11 @@ class SipServer(
             }
 
             restoreRegistrations()
+            dialPlanExecutor?.configure(c)
+            dialPlanExecutor?.refresh()
+            if (c.fileTransferEnabled) {
+                msrp = MsrpManager(this, rStart, rEnd).also { it.start() }
+            }
 
             log("SRV", "════════════════════════════════════")
             log("SRV", "  SIP SERVER + MEDIA RELAY STARTED")
@@ -164,6 +200,9 @@ class SipServer(
         tcpConns.clear()
         relay?.stop()
         relay = null
+        legs.stop()
+        msrp?.stop()
+        msrp = null
         // Registrations stay in the database on purpose: they are restored on next start.
         registered.clear()
         calls.clear()
@@ -286,6 +325,8 @@ class SipServer(
                 banned.entries.removeIf { it.value < now }
 
                 sweepCalls(now)
+                dialPlanExecutor?.refresh()
+                legs.callbackTick()
 
                 if (tick % 6 == 0) { // every 30s
                     val ip = getIp()
@@ -306,11 +347,21 @@ class SipServer(
     private fun sweepCalls(now: Long) {
         for (call in calls.values.toList()) {
             when (call.state) {
-                "TRYING", "RINGING" -> if (now - call.time > RING_TIMEOUT_MS) {
+                "TRYING", "RINGING" -> if (now - call.attemptAt > call.ringTimeoutMs) {
                     log("CALL", "⏱ No answer: ${call.fromExt} → ${call.toExt}")
-                    try { reply(call.invite, 408, "Request Timeout", call.callerIp, call.callerPort) } catch (_: Exception) {}
-                    fireDialPlan(DialPlanCondition.TIMEOUT, call)
-                    endCall(call, "timeout")
+                    cancelCallee(call)
+                    relay?.close(call.id)
+                    val conds = listOf(DialPlanCondition.NO_ANSWER, DialPlanCondition.TIMEOUT)
+                    val ex = dialPlanExecutor
+                    if (ex != null && ex.hasRules(conds, call.toExt, legs.firedRules(call.id))) {
+                        legs.handleFailure(call, 408, conds) {
+                            try { reply(call.invite, 408, "Request Timeout", call.callerIp, call.callerPort) } catch (_: Exception) {}
+                            call.state = "FAILED"; call.endedAt = System.currentTimeMillis()
+                        }
+                    } else {
+                        try { reply(call.invite, 408, "Request Timeout", call.callerIp, call.callerPort) } catch (_: Exception) {}
+                        endCall(call, "timeout")
+                    }
                 }
                 "FAILED", "CANCELLING" -> if (now - call.endedAt > FAILED_LINGER_MS) calls.remove(call.id)
                 "CONNECTED" -> {
@@ -351,6 +402,7 @@ class SipServer(
                 repository.deleteExpiredMessages(now)
                 repository.deleteDeliveredOlderThan(now - 30L * 24 * 60 * 60 * 1000)
                 repository.deleteStaleRegistrations(now - 24L * 60 * 60 * 1000)
+                msrp?.cleanup()
                 log("MSG", "✓ Message cleanup completed")
             } catch (e: Exception) {
                 log("MSG", "Cleanup error: ${e.message}")
@@ -376,6 +428,9 @@ class SipServer(
         log("←", "${msg.requestMethod} from $ip:$port")
 
         msg.header("Route")?.let { if (isOurRoute(it)) msg.removeFirst("Route") }
+
+        // dialogs the server itself terminates (prompts, voicemail, IVR, queue legs, file transfer)
+        if (legs.onRequest(msg, ip, port)) return
 
         when (msg.requestMethod) {
             "REGISTER" -> onRegister(msg, ip, port)
@@ -459,6 +514,8 @@ class SipServer(
                     log("MSG", "📬 $ext has pending message(s)")
                     deliverQueuedMessages(ext)
                 }
+                legs.callbackTick()
+                msrp?.deliverQueuedFiles(ext)
             } catch (e: Exception) {
                 log("REG", "Persist/pending check failed: ${e.message}")
             }
@@ -480,7 +537,7 @@ class SipServer(
         // retransmission / re-INVITE of a known call
         val known = calls[callId]
         if (known != null) {
-            if (known.state == "TRYING" || known.state == "RINGING") {
+            if (known.state == "TRYING" || known.state == "RINGING" || known.state == "HANDLING" || known.state == "ANNOUNCE") {
                 if (msg.cseqNum == known.inviteCSeq && isFromCaller(known, msg, ip, port)) {
                     reply(msg, 100, "Trying", ip, port); return
                 }
@@ -516,18 +573,50 @@ class SipServer(
             }
         }
 
+        // *97 : listen to your own voicemail
+        if (toExt.replace("%2A", "*", true) == "*97") {
+            val vm = Call(id = callId, fromExt = fromExt, toExt = "*97", callerTag = msg.fromTag,
+                callerIp = ip, callerPort = port, calleeIp = "", calleePort = 0, relayed = false, invite = msg.clone())
+            vm.inviteCSeq = msg.cseqNum
+            calls[callId] = vm
+            reply(msg, 100, "Trying", ip, port)
+            legs.runVoicemailMenu(vm)
+            return
+        }
+
         val dest = registered[toExt]
         if (dest == null) {
-            log("CALL", "❌ $toExt NOT ONLINE!")
-            reply(msg, 480, "Temporarily Unavailable", ip, port)
-            dialPlanExecutor?.let { ex ->
-                scope.launch {
-                    try {
-                        val r = ex.execute(DialPlanCondition.OFFLINE, fromExt, toExt, callId)
-                        log("DIALPLAN", if (r.success) "✓ Executed: ${r.message}" else "✗ Failed: ${r.message}")
-                    } catch (e: Exception) { log("DIALPLAN", "✗ Error: ${e.message}") }
-                }
+            val known = repository.getExtensionByNumber(toExt)
+            log("CALL", if (known == null) "❌ $toExt does not exist" else "❌ $toExt NOT ONLINE!")
+
+            // file transfer (MSRP) to an offline user: accept and keep the file for later
+            val m = msrp
+            if (m != null && known != null && SdpUtil.hasMsrp(msg.body)) {
+                val c = Call(id = callId, fromExt = fromExt, toExt = toExt, callerTag = msg.fromTag,
+                    callerIp = ip, callerPort = port, calleeIp = "", calleePort = 0, relayed = false, invite = msg.clone())
+                c.inviteCSeq = msg.cseqNum
+                calls[callId] = c
+                reply(msg, 100, "Trying", ip, port)
+                if (m.acceptOfflineFile(c)) return
+                calls.remove(callId)
             }
+
+            val conds = if (known == null) listOf(DialPlanCondition.INVALID_NUMBER, DialPlanCondition.OFFLINE)
+            else listOf(DialPlanCondition.OFFLINE, DialPlanCondition.UNAVAILABLE)
+            val ex = dialPlanExecutor
+            if (ex != null && ex.hasRules(conds, toExt, emptySet())) {
+                val c = Call(id = callId, fromExt = fromExt, toExt = toExt, callerTag = msg.fromTag,
+                    callerIp = ip, callerPort = port, calleeIp = "", calleePort = 0, relayed = false, invite = msg.clone())
+                c.inviteCSeq = msg.cseqNum
+                calls[callId] = c
+                reply(msg, 100, "Trying", ip, port)
+                legs.handleFailure(c, if (known == null) 404 else 480, conds) {
+                    reply(msg, if (known == null) 404 else 480, if (known == null) "Not Found" else "Temporarily Unavailable", ip, port)
+                    c.state = "FAILED"; c.endedAt = System.currentTimeMillis()
+                }
+                return
+            }
+            reply(msg, 480, "Temporarily Unavailable", ip, port)
             return
         }
         if (calls.count { it.value.state != "FAILED" && it.value.state != "CANCELLING" } >= cfg.maxCalls) {
@@ -542,6 +631,8 @@ class SipServer(
         )
         call.inviteCSeq = msg.cseqNum
         call.video = SdpUtil.hasVideo(msg.body)
+        call.ringTimeoutMs = dialPlanExecutor?.ringTimeoutMs(toExt) ?: RING_TIMEOUT_MS
+        call.fwdUri = msg.requestUri
         calls[callId] = call
         log("CALL", "✓ Found: $toExt @ ${dest.ip}:${dest.port}")
         log("CALL", "   Media: ${if (useRelay) "RELAY via server" else "DIRECT device↔device"}${if (call.video) " (audio+video)" else " (audio)"}")
@@ -562,6 +653,7 @@ class SipServer(
             }
             out.body = sdp
         }
+        call.branch = SipMessage.paramOf(out.header("Via"), "branch") ?: ""
         sendBytes(out.toBytes(), dest.ip, dest.port)
         log("CALL", "→ Forwarded to ${dest.ip}:${dest.port}")
     }
@@ -608,7 +700,7 @@ class SipServer(
         val call = calls[msg.callId] ?: return
         val fromCaller = isFromCaller(call, msg, ip, port)
         val (dIp, dPort) = peerAddr(call, !fromCaller)
-        val out = forwardRequest(msg, ip, port, dIp, dPort) ?: return
+        val out = forwardRequest(msg, ip, port, dIp, dPort, forkSalt(call)) ?: return
         if (call.relayed && msg.body.startsWith("v=")) {
             rewriteSdpFor(call, msg.body, if (fromCaller) MediaRelay.SIDE_A else MediaRelay.SIDE_B)?.let { out.body = it }
         }
@@ -635,10 +727,18 @@ class SipServer(
         val call = calls[msg.callId]
         if (call == null) { reply(msg, 481, "Call/Transaction Does Not Exist", ip, port); return }
         reply(msg, 200, "OK", ip, port)
+        if (call.state == "HANDLING") { // rules are running; the caller has not been answered
+            legs.callerCancelled(call.id)
+            reply(call.invite, 487, "Request Terminated", call.callerIp, call.callerPort)
+            log("CALL", "❌ CANCELLED while handling: ${call.fromExt} → ${call.toExt}")
+            call.state = "CANCELLING"
+            call.endedAt = System.currentTimeMillis()
+            return
+        }
         if (call.state != "TRYING" && call.state != "RINGING") return
 
         val (dIp, dPort) = peerAddr(call, false)
-        forwardRequest(msg, ip, port, dIp, dPort)?.let { sendBytes(it.toBytes(), dIp, dPort) }
+        forwardRequest(msg, ip, port, dIp, dPort, forkSalt(call))?.let { sendBytes(it.toBytes(), dIp, dPort) }
         reply(call.invite, 487, "Request Terminated", call.callerIp, call.callerPort)
         log("CALL", "❌ CANCELLED: ${call.fromExt} → ${call.toExt}")
         call.state = "CANCELLING"
@@ -646,8 +746,12 @@ class SipServer(
         relay?.close(call.id)
     }
 
+    private fun forkSalt(call: Call) = if (call.fork > 0) "f${call.fork}" else ""
+
     private fun endCall(call: Call, why: String) {
         relay?.close(call.id)
+        legs.endCall(call.id)
+        msrp?.closeSession(call.id)
         calls.remove(call.id)
     }
 
@@ -660,11 +764,13 @@ class SipServer(
             registered[ext]?.lastSeen = System.currentTimeMillis()
             return
         }
+        if (legs.onResponse(msg)) return // answers to requests the server itself sent (prompt legs, queue legs)
         val method = msg.cseqMethod
         if (method == "BYE" || method == "MESSAGE" || method == "CANCEL") return // already answered locally
 
         val topVia = msg.header("Via") ?: return
         if (!topVia.contains(BRANCH_PREFIX)) return // not ours
+        val respBranch = SipMessage.paramOf(topVia, "branch")
         msg.removeFirst("Via")
         val next = msg.header("Via") ?: return
         val (dIp, dPort) = viaDest(next) ?: return
@@ -678,6 +784,13 @@ class SipServer(
 
             if (call.state == "CANCELLING" && toCaller) return // caller already got our 487
             if (code == 100) return
+            if (toCaller && call.branch.isNotEmpty() && respBranch != null && respBranch != call.branch) return // old attempt
+            if ((call.state == "HANDLING" || call.state == "ANNOUNCE") && toCaller) {
+                // the callee leg was already cancelled / failed: absorb its late responses
+                if (code >= 300) ackCallee(call, msg)
+                else if (code in 200..299) killLateAnswer(call, msg)
+                return
+            }
 
             if (code in 180..199 && initial) {
                 if (call.state != "RINGING") log("CALL", "🔔 RINGING ${call.toExt}...")
@@ -696,18 +809,21 @@ class SipServer(
                 if (SdpUtil.hasVideo(msg.body)) call.video = true
             }
             if (code >= 300 && initial) {
-                val cond = when (code) {
-                    486, 600 -> DialPlanCondition.BUSY
-                    603 -> DialPlanCondition.REJECTED
-                    408, 480 -> DialPlanCondition.TIMEOUT
-                    in 500..599 -> DialPlanCondition.NETWORK_ERROR
-                    else -> null
-                }
+                val conds = failureConditions(code)
                 log("CALL", "❌ Call failed: $code ${msg.startLine.substringAfter(' ').substringAfter(' ')}")
-                cond?.let { fireDialPlan(it, call) }
+                relay?.close(call.id)
+                val ex = dialPlanExecutor
+                if (conds.isNotEmpty() && ex != null && ex.hasRules(conds, call.toExt, legs.firedRules(call.id))) {
+                    ackCallee(call, msg) // we, not the caller, close the callee transaction
+                    val held = msg
+                    legs.handleFailure(call, code, conds) {
+                        sendBytes(held.toBytes(), dIp, dPort)
+                        call.state = "FAILED"; call.endedAt = System.currentTimeMillis()
+                    }
+                    return // the failure is held back while rules run
+                }
                 call.state = "FAILED"
                 call.endedAt = System.currentTimeMillis()
-                relay?.close(call.id)
             }
         } else if (call != null && msg.body.startsWith("v=") && call.relayed && code in 200..299) {
             val toCaller = isRespToCaller(call, msg, dIp, dPort)
@@ -723,13 +839,111 @@ class SipServer(
         return dIp == call.callerIp && dPort == call.callerPort
     }
 
-    private fun fireDialPlan(cond: DialPlanCondition, call: Call) {
-        dialPlanExecutor?.let { ex ->
-            scope.launch {
-                try {
-                    val r = ex.execute(cond, call.fromExt, call.toExt, call.id)
-                    if (r.success) log("DIALPLAN", "✓ Executed: ${r.message}")
-                } catch (e: Exception) { log("DIALPLAN", "✗ Error: ${e.message}") }
+    private fun failureConditions(code: Int): List<DialPlanCondition> = when (code) {
+        486, 600 -> listOf(DialPlanCondition.BUSY)
+        603 -> listOf(DialPlanCondition.REJECTED)
+        480 -> listOf(DialPlanCondition.UNAVAILABLE, DialPlanCondition.OFFLINE)
+        408 -> listOf(DialPlanCondition.TIMEOUT, DialPlanCondition.NO_ANSWER)
+        404 -> listOf(DialPlanCondition.OFFLINE)
+        403 -> listOf(DialPlanCondition.FORBIDDEN)
+        in 500..599 -> listOf(DialPlanCondition.NETWORK_ERROR)
+        else -> emptyList()
+    }
+
+    /** ACKs a final response from the callee ourselves (used when the response is not passed on). */
+    private fun ackCallee(call: Call, resp: SipMessage) {
+        if (call.calleeIp.isEmpty()) return
+        val a = SipMessage("ACK ${call.fwdUri.ifEmpty { call.invite.requestUri }} SIP/2.0")
+        a.add("Via", "SIP/2.0/${transportFor(call.calleeIp, call.calleePort)} ${ownIpFor(call.calleeIp)}:$sipPort;branch=${call.branch};rport")
+        a.add("Max-Forwards", "70")
+        a.add("From", resp.header("From") ?: call.invite.header("From") ?: "")
+        a.add("To", resp.header("To") ?: "")
+        a.add("Call-ID", call.id)
+        a.add("CSeq", "${call.inviteCSeq} ACK")
+        sendBytes(a.toBytes(), call.calleeIp, call.calleePort)
+    }
+
+    /** CANCEL towards the callee for a still-ringing attempt. */
+    private fun cancelCallee(call: Call) {
+        if (call.calleeIp.isEmpty()) return
+        val c = SipMessage("CANCEL ${call.fwdUri.ifEmpty { call.invite.requestUri }} SIP/2.0")
+        c.add("Via", "SIP/2.0/${transportFor(call.calleeIp, call.calleePort)} ${ownIpFor(call.calleeIp)}:$sipPort;branch=${call.branch};rport")
+        c.add("Max-Forwards", "70")
+        c.add("From", call.invite.header("From") ?: "")
+        c.add("To", call.invite.header("To") ?: "")
+        c.add("Call-ID", call.id)
+        c.add("CSeq", "${call.inviteCSeq} CANCEL")
+        sendBytes(c.toBytes(), call.calleeIp, call.calleePort)
+    }
+
+    /** The callee answered an attempt we had already given up on: ACK it and hang up. */
+    private fun killLateAnswer(call: Call, resp: SipMessage) {
+        if (call.calleeIp.isEmpty()) return
+        val contact = Regex("<(sips?:[^>]+)>").find(resp.header("Contact") ?: "")?.groupValues?.get(1)
+            ?: call.fwdUri.ifEmpty { call.invite.requestUri }
+        val host = ownIpFor(call.calleeIp)
+        val tr = transportFor(call.calleeIp, call.calleePort)
+        val a = SipMessage("ACK $contact SIP/2.0")
+        a.add("Via", "SIP/2.0/$tr $host:$sipPort;branch=${BRANCH_PREFIX}a${System.nanoTime()};rport")
+        a.add("Max-Forwards", "70")
+        a.add("From", resp.header("From") ?: ""); a.add("To", resp.header("To") ?: "")
+        a.add("Call-ID", call.id); a.add("CSeq", "${call.inviteCSeq} ACK")
+        sendBytes(a.toBytes(), call.calleeIp, call.calleePort)
+        val b = SipMessage("BYE $contact SIP/2.0")
+        b.add("Via", "SIP/2.0/$tr $host:$sipPort;branch=${BRANCH_PREFIX}b${System.nanoTime()};rport")
+        b.add("Max-Forwards", "70")
+        b.add("From", resp.header("From") ?: ""); b.add("To", resp.header("To") ?: "")
+        b.add("Call-ID", call.id); b.add("CSeq", "${call.inviteCSeq + 1} BYE")
+        sendBytes(b.toBytes(), call.calleeIp, call.calleePort)
+    }
+
+    /** Re-routes an unanswered call to [ext] (used by the Forward and Retry dial-plan actions). */
+    internal fun retarget(call: Call, ext: String): Boolean {
+        val dest = registered[ext] ?: return false
+        if (call.state != "HANDLING") return false
+        call.toExt = ext
+        call.calleeIp = dest.ip
+        call.calleePort = dest.port
+        call.relayed = shouldRelay(call.callerIp, dest.ip)
+        call.fork++
+        call.attemptAt = System.currentTimeMillis()
+        call.ringTimeoutMs = dialPlanExecutor?.ringTimeoutMs(ext) ?: RING_TIMEOUT_MS
+        val msg = call.invite
+        val out = forwardRequest(msg, call.callerIp, call.callerPort, dest.ip, dest.port, "f${call.fork}") ?: return false
+        out.startLine = "INVITE sip:$ext@${dest.ip}:${dest.port} SIP/2.0"
+        call.fwdUri = "sip:$ext@${dest.ip}:${dest.port}"
+        val rr = if (tcpConns.containsKey("${dest.ip}:${dest.port}")) ";transport=tcp" else ""
+        out.addFirst("Record-Route", "<sip:${ownIpFor(dest.ip)}:$sipPort$rr;lr>")
+        if (call.relayed && msg.body.startsWith("v=")) {
+            val sdp = rewriteSdpFor(call, msg.body, MediaRelay.SIDE_A) ?: return false
+            out.body = sdp
+        }
+        call.branch = SipMessage.paramOf(out.header("Via"), "branch") ?: ""
+        call.state = "TRYING"
+        sendBytes(out.toBytes(), dest.ip, dest.port)
+        log("CALL", "↪ Re-routed ${call.fromExt} → $ext (${dest.ip}:${dest.port})")
+        return true
+    }
+
+    /** System message (e.g. "new voicemail") to an extension; queued when it is offline. */
+    internal fun sendSystemText(toExt: String, text: String) {
+        scope.launch {
+            val r = registered[toExt]
+            if (r == null) {
+                storeOfflineMessage("voicemail", toExt, "text/plain; charset=UTF-8", text)
+            } else {
+                val host = ownIpFor(r.ip)
+                val out = SipMessage("MESSAGE sip:$toExt@${r.ip}:${r.port} SIP/2.0")
+                out.add("Via", "SIP/2.0/${transportFor(r.ip, r.port)} $host:$sipPort;branch=${BRANCH_PREFIX}m${System.nanoTime()};rport")
+                out.add("Max-Forwards", "70")
+                out.add("From", "<sip:voicemail@$host>;tag=q${System.nanoTime() % 1000000}")
+                out.add("To", "<sip:$toExt@$host>")
+                out.add("Call-ID", "sys-${System.nanoTime()}@$host")
+                out.add("CSeq", "1 MESSAGE")
+                out.add("Content-Type", "text/plain; charset=UTF-8")
+                out.add("User-Agent", "Asterisk-Android")
+                out.body = SipMessage.textToBody(text)
+                sendBytes(out.toBytes(), r.ip, r.port)
             }
         }
     }
@@ -772,9 +986,11 @@ class SipServer(
         }
         if (anyRelayable && session.streams.isEmpty()) return null
         val ip = ownIpFor(targetIp)
-        return SdpUtil.rewriteForRelay(sdp, ip, cfg.videoEnabled) { m ->
+        val rewritten = SdpUtil.rewriteForRelay(sdp, ip, cfg.videoEnabled) { m ->
             session.streams.firstOrNull { it.index == m.index }?.ports(target)
         }
+        val m = msrp
+        return if (m != null && SdpUtil.hasMsrp(sdp)) m.rewriteSdp(call, rewritten, originSide, ip) else rewritten
     }
 
     // ------------------------------------------------------------ MESSAGE
@@ -808,7 +1024,7 @@ class SipServer(
                 repository.insertOfflineMessage(
                     OfflineMessage(
                         fromExt = fromExt, toExt = toExt, contentType = contentType, messageBody = body,
-                        timestamp = now, expiresAt = now + 7L * 24 * 60 * 60 * 1000
+                        timestamp = now, expiresAt = now + cfg.offlineMessageDays.coerceIn(1, 365) * 24L * 60 * 60 * 1000
                     )
                 )
                 log("MSG", "✓ Message queued for $toExt (total pending: ${repository.getPendingMessageCount(toExt)})")
@@ -856,7 +1072,7 @@ class SipServer(
 
     // ------------------------------------------------------------ forwarding helpers
 
-    private fun forwardRequest(orig: SipMessage, srcIp: String, srcPort: Int, destIp: String, destPort: Int): SipMessage? {
+    private fun forwardRequest(orig: SipMessage, srcIp: String, srcPort: Int, destIp: String, destPort: Int, salt: String = ""): SipMessage? {
         val m = orig.clone()
         m.header("Max-Forwards")?.trim()?.toIntOrNull()?.let {
             if (it <= 0) return null
@@ -865,7 +1081,7 @@ class SipServer(
         val i = m.headers.indexOfFirst { it.first.equals("Via", true) }
         if (i >= 0) m.headers[i] = "Via" to markReceived(m.headers[i].second, srcIp, srcPort)
         val methodForBranch = if (orig.requestMethod == "CANCEL" || orig.requestMethod == "ACK") "INVITE" else orig.requestMethod
-        val branch = BRANCH_PREFIX + md5("${orig.callId}|${orig.cseqNum}|$methodForBranch|${orig.topViaBranch}").take(20)
+        val branch = BRANCH_PREFIX + md5("${orig.callId}|${orig.cseqNum}|$methodForBranch|${orig.topViaBranch}$salt").take(20)
         m.addFirst("Via", "SIP/2.0/${transportFor(destIp, destPort)} ${ownIpFor(destIp)}:$sipPort;branch=$branch;rport")
         return m
     }
@@ -911,6 +1127,10 @@ class SipServer(
     // ------------------------------------------------------------ responses we generate
 
     private fun reply(req: SipMessage, code: Int, reason: String, ip: String, port: Int, vararg extra: Pair<String, String>) {
+        sendBytes(buildReply(req, code, reason, ip, port, *extra).toBytes(), ip, port)
+    }
+
+    private fun buildReply(req: SipMessage, code: Int, reason: String, ip: String, port: Int, vararg extra: Pair<String, String>): SipMessage {
         val r = SipMessage("SIP/2.0 $code $reason")
         val vias = req.headerList("Via")
         vias.forEachIndexed { i, v -> r.add("Via", if (i == 0) markReceived(v, ip, port) else v) }
@@ -922,7 +1142,7 @@ class SipServer(
         r.add("CSeq", req.header("CSeq") ?: "")
         r.add("Server", "Asterisk-Android")
         extra.forEach { r.add(it.first, it.second) }
-        sendBytes(r.toBytes(), ip, port)
+        return r
     }
 
     private enum class AuthResult { OK, BAD, STALE }

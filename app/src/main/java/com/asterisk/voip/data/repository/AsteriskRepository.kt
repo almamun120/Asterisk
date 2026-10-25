@@ -12,7 +12,9 @@ class AsteriskRepository(
     private val voicePromptDao: VoicePromptDao,
     private val dialPlanRuleDao: DialPlanRuleDao,
     private val dialPlanScheduleDao: DialPlanScheduleDao,
-    private val registrationDao: RegistrationDao
+    private val registrationDao: RegistrationDao,
+    private val voicemailDao: VoicemailDao,
+    private val offlineFileDao: OfflineFileDao
 ) {
     // Extensions
     val allExtensions: Flow<List<Extension>> = extensionDao.getAllExtensions()
@@ -47,6 +49,7 @@ class AsteriskRepository(
     val enabledDialPlanRules: Flow<List<DialPlanRule>> = dialPlanRuleDao.getEnabledRules()
 
     suspend fun getDialPlanRuleById(id: Long) = dialPlanRuleDao.getRuleById(id)
+    suspend fun getEnabledRulesNow() = dialPlanRuleDao.getEnabledRulesNow()
     suspend fun getRulesByCondition(condition: DialPlanCondition) = dialPlanRuleDao.getRulesByCondition(condition)
     suspend fun getRulesByPattern(pattern: String) = dialPlanRuleDao.getRulesByPattern(pattern)
     suspend fun insertDialPlanRule(rule: DialPlanRule) = dialPlanRuleDao.insertRule(rule)
@@ -82,4 +85,22 @@ class AsteriskRepository(
     suspend fun saveRegistration(r: Registration) = registrationDao.upsert(r)
     suspend fun deleteRegistration(extension: String) = registrationDao.delete(extension)
     suspend fun deleteStaleRegistrations(olderThan: Long) = registrationDao.deleteStale(olderThan)
+
+    // Voicemail
+    suspend fun insertVoicemail(v: Voicemail) = voicemailDao.insert(v)
+    suspend fun getVoicemails(mailbox: String) = voicemailDao.forMailbox(mailbox)
+    suspend fun getUnheardVoicemailCount(mailbox: String) = voicemailDao.unheardCount(mailbox)
+    suspend fun getVoicemailCount(mailbox: String) = voicemailDao.totalCount(mailbox)
+    suspend fun markVoicemailHeard(id: Long) = voicemailDao.markHeard(id)
+    suspend fun deleteVoicemail(id: Long) = voicemailDao.delete(id)
+    suspend fun getVoicemailsOlderThan(before: Long) = voicemailDao.olderThan(before)
+    suspend fun deleteVoicemailsOlderThan(before: Long) = voicemailDao.deleteOlderThan(before)
+
+    // Offline files (SIP/MSRP store-and-forward)
+    suspend fun insertOfflineFile(f: OfflineFile) = offlineFileDao.insert(f)
+    suspend fun getPendingFiles(ext: String) = offlineFileDao.pendingFor(ext)
+    suspend fun getPendingFileCount(ext: String) = offlineFileDao.pendingCount(ext)
+    suspend fun markFileDelivered(id: Long) = offlineFileDao.markDelivered(id)
+    suspend fun getStaleFiles(now: Long, deliveredBefore: Long) = offlineFileDao.stale(now, deliveredBefore)
+    suspend fun deleteOfflineFile(id: Long) = offlineFileDao.delete(id)
 }

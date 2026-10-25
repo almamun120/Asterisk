@@ -45,13 +45,13 @@ class AsteriskManager(
         log(level, tag, message)
     }
 
-    private val dialPlanExecutor = DialPlanExecutor(repository, voicePromptManager) { level, tag, message ->
+    private val dialPlanExecutor = DialPlanExecutor(repository, voicePromptManager, context.filesDir) { level, tag, message ->
         log(level, tag, message)
     }
 
     init {
         // Initialize dial plan in SIP server
-        sipServer.initializeDialPlan(dialPlanExecutor, voicePromptManager)
+        sipServer.initializeDialPlan(dialPlanExecutor, voicePromptManager, context.filesDir)
         log(LogLevel.INFO, "INIT", "✓ AsteriskManager initialized with dial plan support")
     }
 

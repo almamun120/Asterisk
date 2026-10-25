@@ -259,6 +259,9 @@ class SettingsFragment : Fragment() {
             spinnerMediaMode.setSelection(listOf("auto", "relay", "direct").indexOf(config.mediaMode).coerceAtLeast(0))
             etRegisterExpiry.setText(config.registerExpiry.toString())
             etRelayIdle.setText(config.relayIdleTimeout.toString())
+            etOfflineMsgDays.setText(config.offlineMessageDays.toString())
+            etFileMaxMb.setText(config.fileMaxSizeMb.toString())
+            etFileKeepDays.setText(config.fileKeepDays.toString())
 
             // SIP Transport
             spinnerSipTransport.setSelection(getSipTransportIndex(config.sipTransport))
@@ -474,6 +477,9 @@ class SettingsFragment : Fragment() {
                 mediaMode = listOf("auto", "relay", "direct").getOrElse(spinnerMediaMode.selectedItemPosition) { "auto" },
                 registerExpiry = (etRegisterExpiry.text.toString().toIntOrNull() ?: 120).coerceIn(30, 3600),
                 relayIdleTimeout = (etRelayIdle.text.toString().toIntOrNull() ?: 120).coerceIn(0, 3600),
+                offlineMessageDays = (etOfflineMsgDays.text.toString().toIntOrNull() ?: 3).coerceIn(1, 365),
+                fileMaxSizeMb = (etFileMaxMb.text.toString().toIntOrNull() ?: 20).coerceIn(1, 500),
+                fileKeepDays = (etFileKeepDays.text.toString().toIntOrNull() ?: 3).coerceIn(1, 365),
 
                 // SIP Transport
                 sipTransport = getSipTransportFromSpinner(),

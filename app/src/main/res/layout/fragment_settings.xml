@@ -113,6 +113,53 @@
                         android:text="120" />
                 </com.google.android.material.textfield.TextInputLayout>
 
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Offline message keep time (days)"
+                    app:helperText="Messages for an offline user are saved and delivered when it comes back, for this many days.">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_offline_msg_days"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="3" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Max file size for file sharing (MB)"
+                    app:helperText="SIP + MSRP file transfer. Files sent to offline users are kept and delivered later.">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_file_max_mb"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="20" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Offline file keep time (days)">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_file_keep_days"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="3" />
+                </com.google.android.material.textfield.TextInputLayout>
+
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"

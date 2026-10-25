@@ -171,19 +171,23 @@ class DialPlanRuleDialogFragment : BottomSheetDialogFragment() {
 
     private fun updateActionDataVisibility(action: DialPlanAction) {
         binding.tilActionData.hint = when (action) {
-            DialPlanAction.PLAY_ANNOUNCEMENT -> "Voice Prompt ID"
+            DialPlanAction.PLAY_ANNOUNCEMENT -> "Voice Prompt ID(s), e.g. 1 or 1,2"
+            DialPlanAction.VOICEMAIL -> "Greeting prompt ID; max=SECONDS (optional)"
             DialPlanAction.FORWARD_TO_EXTENSION -> "Extension Number"
-            DialPlanAction.FORWARD_TO_QUEUE -> "Queue ID"
-            DialPlanAction.FORWARD_TO_IVR -> "IVR Menu ID"
-            DialPlanAction.CUSTOM -> "Custom Action Data"
+            DialPlanAction.FORWARD_TO_QUEUE -> "101,102;strategy=ringall;timeout=60;moh=7"
+            DialPlanAction.FORWARD_TO_IVR -> "7|1=ext:101|2=queue:101,102|3=vm:105|0=hangup"
+            DialPlanAction.CALLBACK -> "Prompt ID to play first (optional)"
+            DialPlanAction.CUSTOM -> "reject:486 ; tone:busy ; message:text ; play:ID ; hangup"
             else -> "Action Data (Optional)"
         }
 
         binding.tilActionData.visibility = when (action) {
             DialPlanAction.PLAY_ANNOUNCEMENT,
+            DialPlanAction.VOICEMAIL,
             DialPlanAction.FORWARD_TO_EXTENSION,
             DialPlanAction.FORWARD_TO_QUEUE,
             DialPlanAction.FORWARD_TO_IVR,
+            DialPlanAction.CALLBACK,
             DialPlanAction.CUSTOM -> View.VISIBLE
             else -> View.GONE
         }

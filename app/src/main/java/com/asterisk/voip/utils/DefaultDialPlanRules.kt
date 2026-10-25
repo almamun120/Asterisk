@@ -37,12 +37,12 @@ object DefaultDialPlanRules {
 
             // Rule 3: Call Rejected
             DialPlanRule(
-                name = "Call Rejected - Voicemail",
-                description = "Send to voicemail when call is rejected",
+                name = "Call Rejected - Play Announcement",
+                description = "Caller hears a message when the person declines the call",
                 pattern = "*",
                 condition = DialPlanCondition.REJECTED,
-                action = DialPlanAction.VOICEMAIL,
-                actionData = "",
+                action = DialPlanAction.PLAY_ANNOUNCEMENT,
+                actionData = "6", // Prompt ID
                 priority = 10,
                 timeout = 30,
                 maxRetries = 0,
@@ -51,12 +51,12 @@ object DefaultDialPlanRules {
 
             // Rule 4: No Answer
             DialPlanRule(
-                name = "No Answer - Voicemail",
-                description = "Send to voicemail after timeout with no answer",
+                name = "No Answer - Play Announcement",
+                description = "Caller hears a message when nobody picks up (Timeout = ring seconds)",
                 pattern = "*",
                 condition = DialPlanCondition.NO_ANSWER,
-                action = DialPlanAction.VOICEMAIL,
-                actionData = "",
+                action = DialPlanAction.PLAY_ANNOUNCEMENT,
+                actionData = "7", // Prompt ID
                 priority = 10,
                 timeout = 30,
                 maxRetries = 0,
@@ -93,12 +93,12 @@ object DefaultDialPlanRules {
 
             // Rule 7: Timeout
             DialPlanRule(
-                name = "Timeout - Voicemail",
-                description = "Send to voicemail on timeout",
+                name = "Timeout - Play Announcement",
+                description = "Caller hears a message on timeout",
                 pattern = "*",
                 condition = DialPlanCondition.TIMEOUT,
-                action = DialPlanAction.VOICEMAIL,
-                actionData = "",
+                action = DialPlanAction.PLAY_ANNOUNCEMENT,
+                actionData = "7", // Prompt ID
                 priority = 10,
                 timeout = 30,
                 maxRetries = 0,
@@ -160,6 +160,26 @@ object DefaultDialPlanRules {
                 filePath = "",
                 fileType = VoicePromptType.TTS,
                 ttsText = "The number you have dialed is invalid. Please check the number and try again.",
+                language = "en-US",
+                enabled = true
+            ),
+            VoicePrompt(
+                id = 6,
+                name = "Call Declined",
+                description = "The person declined the call",
+                filePath = "",
+                fileType = VoicePromptType.TTS,
+                ttsText = "The person you are calling is unable to take your call right now. Please try again later.",
+                language = "en-US",
+                enabled = true
+            ),
+            VoicePrompt(
+                id = 7,
+                name = "No Answer",
+                description = "Nobody answered",
+                filePath = "",
+                fileType = VoicePromptType.TTS,
+                ttsText = "The person you are calling is not answering. Please try again later.",
                 language = "en-US",
                 enabled = true
             ),

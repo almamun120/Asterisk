@@ -96,6 +96,13 @@ data class ServerConfig(
     val voicemailEmail: Boolean = false,
     val voicemailAttach: Boolean = false,
 
+    // Offline delivery
+    // How long a message for an offline extension is kept and delivered when it comes back online.
+    val offlineMessageDays: Int = 3,
+    val fileTransferEnabled: Boolean = true,
+    val fileMaxSizeMb: Int = 20,
+    val fileKeepDays: Int = 3,
+
     // IVR (Interactive Voice Response)
     val ivrEnabled: Boolean = false,
     val ivrTimeout: Int = 10, // seconds

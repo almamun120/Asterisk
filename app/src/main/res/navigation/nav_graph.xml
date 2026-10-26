@@ -29,4 +29,9 @@
         android:name="com.asterisk.voip.ui.settings.SettingsFragment"
         android:label="Settings" />
 
+    <fragment
+        android:id="@+id/gatewaysFragment"
+        android:name="com.asterisk.voip.ui.gateways.GatewaysFragment"
+        android:label="Gateways" />
+
 </navigation>

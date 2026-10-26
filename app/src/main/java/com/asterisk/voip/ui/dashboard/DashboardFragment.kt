@@ -65,6 +65,10 @@ class DashboardFragment : Fragment() {
             binding.tvMediaModeHint.text = hintFor(mode)
         }
 
+        binding.btnGateways.setOnClickListener {
+            androidx.navigation.fragment.NavHostFragment.findNavController(this).navigate(R.id.gatewaysFragment)
+        }
+
         binding.btnBattery.setOnClickListener { requestBatteryExemption() }
     }
 

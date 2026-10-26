@@ -21,6 +21,18 @@ data class CallInfo(
     val packets: Long
 )
 
+data class TrunkInfo(
+    val id: Long,
+    val name: String,
+    val host: String,
+    val username: String,
+    val state: String,
+    val detail: String,
+    val lastOk: Long,
+    val activeCalls: Int,
+    val publicAddr: String
+)
+
 data class ServerStatus(
     val isRunning: Boolean = false,
     val uptime: Long = 0,
@@ -34,5 +46,6 @@ data class ServerStatus(
     val relayKbps: Int = 0,
     val rtpRange: String = "",
     val peers: List<PeerInfo> = emptyList(),
-    val calls: List<CallInfo> = emptyList()
+    val calls: List<CallInfo> = emptyList(),
+    val trunks: List<TrunkInfo> = emptyList()
 )

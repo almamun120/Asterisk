@@ -63,7 +63,8 @@ class AsteriskApplication : Application() {
             database.dialPlanScheduleDao(),
             database.registrationDao(),
             database.voicemailDao(),
-            database.offlineFileDao()
+            database.offlineFileDao(),
+            database.trunkDao()
         )
         asteriskManager = AsteriskManager(this, repository)
     }

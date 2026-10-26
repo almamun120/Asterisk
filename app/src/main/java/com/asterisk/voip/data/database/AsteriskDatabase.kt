@@ -19,9 +19,10 @@ import com.asterisk.voip.data.model.*
         DialPlanSchedule::class,
         Registration::class,
         Voicemail::class,
-        OfflineFile::class
+        OfflineFile::class,
+        Trunk::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AsteriskDatabase : RoomDatabase() {
@@ -35,6 +36,7 @@ abstract class AsteriskDatabase : RoomDatabase() {
     abstract fun registrationDao(): RegistrationDao
     abstract fun voicemailDao(): VoicemailDao
     abstract fun offlineFileDao(): OfflineFileDao
+    abstract fun trunkDao(): TrunkDao
 
     companion object {
         /** 5 -> 6: adds the persisted registrations table, keeps all existing data. */
@@ -69,6 +71,23 @@ abstract class AsteriskDatabase : RoomDatabase() {
             }
         }
 
+        /** 7 -> 8: gateway (SIP trunk) accounts. Keeps all existing data. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `trunks` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, " +
+                        "`host` TEXT NOT NULL, `port` INTEGER NOT NULL, `username` TEXT NOT NULL, " +
+                        "`password` TEXT NOT NULL, `authUser` TEXT NOT NULL, `domain` TEXT NOT NULL, " +
+                        "`outboundProxy` TEXT NOT NULL, `register` INTEGER NOT NULL, `expiry` INTEGER NOT NULL, " +
+                        "`keepAlive` INTEGER NOT NULL, `callerId` TEXT NOT NULL, `outPrefixes` TEXT NOT NULL, " +
+                        "`stripDigits` INTEGER NOT NULL, `addPrefix` TEXT NOT NULL, `priority` INTEGER NOT NULL, " +
+                        "`codecs` TEXT NOT NULL, `inboundTarget` TEXT NOT NULL, `inboundMap` TEXT NOT NULL, " +
+                        "`maxChannels` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AsteriskDatabase? = null
 
@@ -79,7 +98,7 @@ abstract class AsteriskDatabase : RoomDatabase() {
                     AsteriskDatabase::class.java,
                     "asterisk_database"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

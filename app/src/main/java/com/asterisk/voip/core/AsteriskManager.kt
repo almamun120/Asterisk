@@ -198,7 +198,8 @@ class AsteriskManager(
                     relayKbps = kbps,
                     rtpRange = "${serverConfig.rtpStartPort}-${serverConfig.rtpEndPort}",
                     peers = sipServer.getPeers(),
-                    calls = sipServer.getCalls()
+                    calls = sipServer.getCalls(),
+                    trunks = sipServer.getTrunks()
                 )
                 delay(1000)
             }
@@ -257,6 +258,7 @@ class AsteriskManager(
         scope.launch {
             try {
                 configure(prefs.serverConfig.first(), prefs.stunTurnConfig.first())
+                sipServer.reloadTrunks()
                 log(LogLevel.INFO, "CFG", "Configuration reloaded" +
                     if (_isRunning.value) " (ports/transport changes need a server restart)" else "")
             } catch (e: Exception) {
@@ -264,6 +266,8 @@ class AsteriskManager(
             }
         }
     }
+
+    fun retryTrunk(id: Long) = sipServer.retryTrunk(id)
 
     fun getLocalIp() = sipServer.getServerIp()
 

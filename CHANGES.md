@@ -1,3 +1,18 @@
+# Asterisk Android – v1.3.0 changes (Gateways)
+
+## Gateways = log in to external VoIP services
+Dashboard → **Gateways (VoIP accounts)** → *Add gateway*. Any number of accounts can be added; each one stays registered at the same time.
+- **Registration**: digest login (401/407, MD5/SHA-256), automatic refresh, retry with back-off (15 s → 5 min), NAT keep-alive, un-REGISTER (Expires 0) on stop/disable/delete. Live status per gateway (Registered / Connecting / Auth failed / Failed + reason). *Re-register* button.
+- **IP-authenticated trunks**: switch off "Log in (REGISTER)"; the gateway is pinged with OPTIONS and shown as Reachable/Unreachable.
+- **Outbound** (extension → provider): a number that is not a local extension is matched against each gateway's *Outbound prefixes* (comma list, `*` = any). Longest prefix wins, then *Priority*. *Strip leading digits* / *Add prefix* adjust the number; *Caller ID* is sent as From. If a gateway answers 5xx/408/403 the next matching gateway is tried (failover).
+- **Inbound** (provider → extension): calls from the provider ring *Inbound: ring extension*, or a per-number map `number=ext,number=ext`. They go through the normal call path, so dial-plan rules, voicemail, announcements and IVR work on gateway calls too.
+- **Media**: gateway calls always go through the server's RTP relay (audio). Codec offer to the provider is limited to the gateway's *Codecs* (default ulaw,alaw + DTMF); video is not sent to providers. No transcoding: set the extensions' phones to use G.711 for gateway calls.
+- Hold/resume (re-INVITE), DTMF (RFC 2833 passes through; SIP INFO is forwarded), CANCEL, BYE from either side, ring timeout (90 s) and idle-media hang-up are handled. Call transfer (REFER) over a gateway is not supported.
+- The server's public address is learned from the provider's reply (`received`/`rport`) and used in Contact/SDP. If you have port-forwarding, set *External IP* + *NAT* in Settings instead.
+- Database v8 (new `trunks` table; existing data is kept).
+
+Notes: the provider host is resolved with normal DNS (A records; SRV/NAPTR are not used). The phone must be reachable by the provider for RTP (public IP or forwarded RTP range, VPN, etc.).
+
 # Asterisk Android – v1.2.0 changes
 
 ## Callers now really hear the prompts

@@ -14,7 +14,8 @@ class AsteriskRepository(
     private val dialPlanScheduleDao: DialPlanScheduleDao,
     private val registrationDao: RegistrationDao,
     private val voicemailDao: VoicemailDao,
-    private val offlineFileDao: OfflineFileDao
+    private val offlineFileDao: OfflineFileDao,
+    private val trunkDao: TrunkDao
 ) {
     // Extensions
     val allExtensions: Flow<List<Extension>> = extensionDao.getAllExtensions()
@@ -103,4 +104,11 @@ class AsteriskRepository(
     suspend fun markFileDelivered(id: Long) = offlineFileDao.markDelivered(id)
     suspend fun getStaleFiles(now: Long, deliveredBefore: Long) = offlineFileDao.stale(now, deliveredBefore)
     suspend fun deleteOfflineFile(id: Long) = offlineFileDao.delete(id)
+
+    // Gateways (SIP trunks)
+    val allTrunks: Flow<List<Trunk>> = trunkDao.getAll()
+    suspend fun getTrunksNow() = trunkDao.getAllNow()
+    suspend fun insertTrunk(t: Trunk) = trunkDao.insert(t)
+    suspend fun updateTrunk(t: Trunk) = trunkDao.update(t)
+    suspend fun deleteTrunk(t: Trunk) = trunkDao.delete(t)
 }

@@ -96,6 +96,7 @@ class SipServer(
 
     private var dialPlanExecutor: DialPlanExecutor? = null
     private val legs = LegManager(this)
+    private val gateway = GatewayManager(this)
     private var msrp: MsrpManager? = null
 
     // accessors for LegManager / MsrpManager (same module)
@@ -108,6 +109,7 @@ class SipServer(
     internal val prompts: VoicePromptManager? get() = voicePromptManager
     internal val legManager: LegManager get() = legs
     internal val repo: AsteriskRepository get() = repository
+    internal val mediaRelay: MediaRelay? get() = relay
     @Volatile internal var storageDir: java.io.File = java.io.File("/data/local/tmp")
     internal suspend fun queueText(fromExt: String, toExt: String, contentType: String, text: String) =
         storeOfflineMessage(fromExt, toExt, contentType, text)
@@ -166,6 +168,7 @@ class SipServer(
             }
 
             restoreRegistrations()
+            scope.launch { gateway.start() }
             dialPlanExecutor?.configure(c)
             dialPlanExecutor?.refresh()
             if (c.fileTransferEnabled) {
@@ -193,6 +196,7 @@ class SipServer(
     }
 
     fun stop() {
+        try { gateway.stop() } catch (_: Exception) {}
         running = false
         try { udp?.close() } catch (_: Exception) {}
         try { tcpServer?.close() } catch (_: Exception) {}
@@ -325,6 +329,7 @@ class SipServer(
                 banned.entries.removeIf { it.value < now }
 
                 sweepCalls(now)
+                gateway.tick(now)
                 dialPlanExecutor?.refresh()
                 legs.callbackTick()
 
@@ -422,7 +427,7 @@ class SipServer(
         if ((banned[ip] ?: 0L) > System.currentTimeMillis()) return
         touch(ip, port)
 
-        if (msg.isResponse) { onResponse(msg); return }
+        if (msg.isResponse) { if (gateway.onResponse(msg, ip, port)) return; onResponse(msg); return }
 
         if (cfg.sipDebug) log("SIP", "← ${msg.startLine}")
         log("←", "${msg.requestMethod} from $ip:$port")
@@ -431,6 +436,8 @@ class SipServer(
 
         // dialogs the server itself terminates (prompts, voicemail, IVR, queue legs, file transfer)
         if (legs.onRequest(msg, ip, port)) return
+        // calls bridged to / from external VoIP gateways
+        if (gateway.onRequest(msg, ip, port)) return
 
         when (msg.requestMethod) {
             "REGISTER" -> onRegister(msg, ip, port)
@@ -548,16 +555,24 @@ class SipServer(
             }
         }
 
-        val fromExt = SipMessage.userOf(msg.header("From"))
-        val toExt = SipMessage.userOf(msg.requestUri) ?: SipMessage.userOf(msg.header("To"))
+        // a call coming in from an external VoIP gateway (trusted by its address)
+        val inTrunk = gateway.inboundTrunk(msg, ip, port)
+
+        val fromExt = SipMessage.userOf(msg.header("From")) ?: if (inTrunk != null) "anonymous" else null
+        val toExt = if (inTrunk != null) gateway.mapInbound(inTrunk, msg)
+        else SipMessage.userOf(msg.requestUri) ?: SipMessage.userOf(msg.header("To"))
+        if (inTrunk != null && toExt == null) {
+            log("GW", "❌ inbound call from ${inTrunk.name}: no target extension configured")
+            reply(msg, 404, "Not Found", ip, port); return
+        }
         if (fromExt == null || toExt == null) { reply(msg, 400, "Bad Request", ip, port); return }
 
         log("CALL", "════════════════════════════════════")
-        log("CALL", "📞 INCOMING CALL  $fromExt → $toExt   (from $ip:$port)")
+        log("CALL", "📞 INCOMING CALL  $fromExt → $toExt   (from $ip:$port)${if (inTrunk != null) "  [gateway ${inTrunk.name}]" else ""}")
 
         // who is calling? registered from this address -> trusted, otherwise digest challenge
-        val me = registered[fromExt]
-        if (me == null && !cfg.allowGuest) {
+        val me = if (inTrunk != null) null else registered[fromExt]
+        if (me == null && inTrunk == null && !cfg.allowGuest) {
             log("CALL", "❌ $fromExt is not registered")
             reply(msg, 403, "Forbidden", ip, port); return
         }
@@ -582,6 +597,11 @@ class SipServer(
             reply(msg, 100, "Trying", ip, port)
             legs.runVoicemailMenu(vm)
             return
+        }
+
+        // number that is not a local extension -> send it out through a gateway (SIP trunk)
+        if (inTrunk == null && registered[toExt] == null && repository.getExtensionByNumber(toExt) == null) {
+            if (gateway.startOutbound(msg, ip, port, fromExt, toExt)) return
         }
 
         val dest = registered[toExt]
@@ -623,7 +643,7 @@ class SipServer(
             log("CALL", "❌ Max calls reached"); reply(msg, 503, "Service Unavailable", ip, port); return
         }
 
-        val useRelay = shouldRelay(ip, dest.ip)
+        val useRelay = inTrunk != null || shouldRelay(ip, dest.ip) // gateway calls always go through the relay
         val call = Call(
             id = callId, fromExt = fromExt, toExt = toExt, callerTag = msg.fromTag,
             callerIp = ip, callerPort = port, calleeIp = dest.ip, calleePort = dest.port,
@@ -641,6 +661,7 @@ class SipServer(
 
         val out = forwardRequest(msg, ip, port, dest.ip, dest.port)
         if (out == null) { calls.remove(callId); reply(msg, 483, "Too Many Hops", ip, port); return }
+        if (inTrunk != null) out.startLine = "INVITE sip:$toExt@${ownIpFor(dest.ip)}:$sipPort SIP/2.0"
         val rr = if (tcpConns.containsKey("${dest.ip}:${dest.port}")) ";transport=tcp" else ""
         out.addFirst("Record-Route", "<sip:${ownIpFor(dest.ip)}:$sipPort$rr;lr>")
 
@@ -1249,7 +1270,7 @@ class SipServer(
     // ------------------------------------------------------------ public API (UI)
 
     fun getRegisteredCount() = registered.size
-    fun getActiveCallCount() = calls.values.count { it.state != "FAILED" && it.state != "CANCELLING" }
+    fun getActiveCallCount() = calls.values.count { it.state != "FAILED" && it.state != "CANCELLING" } + gateway.activeCount()
     fun getServerIp() = localIp
     fun getRelayBytes() = relay?.totalBytes?.get() ?: 0L
 
@@ -1261,10 +1282,14 @@ class SipServer(
         }
     }
 
+    fun getTrunks() = gateway.trunkInfos()
+    fun reloadTrunks() { if (running) scope.launch { gateway.reload() } }
+    fun retryTrunk(id: Long) = gateway.retryNow(id)
+
     fun getCalls(): List<CallInfo> = calls.values
         .filter { it.state != "FAILED" && it.state != "CANCELLING" }
         .sortedBy { it.time }
-        .map { CallInfo(it.id, it.fromExt, it.toExt, it.state, it.time, it.relayed, it.video, relay?.session(it.id)?.packets?.get() ?: 0L) }
+        .map { CallInfo(it.id, it.fromExt, it.toExt, it.state, it.time, it.relayed, it.video, relay?.session(it.id)?.packets?.get() ?: 0L) } + gateway.callInfos()
 }
 
 /** Tiny IPv4 helpers. */

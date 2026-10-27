@@ -122,5 +122,17 @@ object Tones {
         }
     }
 
+    /** Short rising two-note chime: somebody joined the conference. */
+    fun joinTone(): ShortArray = G711.concat(listOf(tone(880.0, 110), G711.silence(30), tone(1320.0, 130)))
+
+    /** Short falling two-note chime: somebody left the conference. */
+    fun leaveTone(): ShortArray = G711.concat(listOf(tone(1320.0, 110), G711.silence(30), tone(880.0, 130)))
+
+    /** Low single beep: you are muted. */
+    fun mutedTone(): ShortArray = G711.concat(listOf(tone(440.0, 250), G711.silence(40), tone(440.0, 250)))
+
+    /** High single beep: you are unmuted. */
+    fun unmutedTone(): ShortArray = tone(1000.0, 200)
+
     fun beep(): ShortArray = G711.concat(listOf(G711.silence(150), tone(1000.0, 350), G711.silence(150)))
 }

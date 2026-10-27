@@ -1,3 +1,19 @@
+# Asterisk Android – v1.4.0 changes (Conference calls)
+
+## Conference rooms (server-side audio mixer)
+The server now mixes audio itself, so any phone/app can join a conference – even apps that cannot mix calls on the phone.
+- **Join**: dial the conference code (Settings → Call Features → *Conference*, default `*80`). `*80` = main room, `*801`, `*802` … = other rooms. Works from any registered extension; the number may also be a plain number such as `8000` if your app cannot dial `*` (it is ignored when a real extension has that number).
+- **Add a person** (the "add call → merge" step): while in the room press `*3`, type the extension, press `#`. The server rings that extension and puts it in the room when it answers. The caller stays in the room while it rings.
+- **Keys in the room**: `*6` mute / unmute yourself, `*1` how many people are here, `*3` add an extension.
+- Everybody hears all the OTHER people (mix-minus, no echo of your own voice). PCMU and PCMA phones can be in the same room. A chime is played when somebody joins / leaves. With 4+ people a noise gate keeps line noise from adding up.
+- Optional **PIN** (asked when dialling in), **max people per room** (default 10). A person alone in a room for 10 minutes is hung up.
+- Dashboard → *Active calls* shows each room with its members (muted ones are marked).
+- Needs the phone to offer G.711 (PCMU/PCMA) – same requirement as prompts / voicemail / IVR. Video is not mixed.
+- Not yet: external gateway callers cannot be dialled-in by `*3` (extensions only), and an inbound gateway call cannot be sent to a conference room.
+
+## Normal "second call + merge" in phone apps
+Apps that hold call 1, dial call 2 and then press *Merge/Conference* mix the audio on the phone. The server treats these as ordinary separate calls, so this works as before. One fix for it: after a long hold, a resumed relayed call could be closed by the idle-media timer before audio restarted; the timer is now reset on resume.
+
 # Asterisk Android – v1.3.0 changes (Gateways)
 
 ## Gateways = log in to external VoIP services

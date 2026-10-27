@@ -507,6 +507,53 @@ class LegManager(private val srv: SipServer) {
         }
     }
 
+    // ------------------------------------------------------------ conference rooms
+
+    /** Dial the conference code: the server answers the caller and puts it into the room's audio mix. */
+    fun runConference(call: SipServer.Call, room: String) {
+        val conf = srv.conference
+        val s = sessions.getOrPut(call.id) { Session(call.fromExt, room, call.id, call) }
+        s.passThrough = {
+            srv.sendReply(call.invite, 480, "Temporarily Unavailable", call.callerIp, call.callerPort)
+            srv.callMap.remove(call.id); sessions.remove(call.id)
+        }
+        call.state = "HANDLING"
+        srv.scope.launch {
+            val ctx = Ctx(s)
+            try {
+                if (ctx.answer()) {
+                    val leg = s.leg
+                    if (leg != null) {
+                        call.toExt = "Conference " + conf.label(room)
+                        conf.runMember(room, leg, s.fromExt, null)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                srv.slog("ERR", "Conference error: ${e.message}")
+            }
+            finishSession(s, ctx)
+        }
+    }
+
+    /** Rings [ext] (G.711 + RFC 2833) and returns the answered leg, or null if it is busy / offline / does not answer. */
+    suspend fun dialAudio(ext: String, fromUser: String, ringMs: Long): Leg? {
+        if (!isAvailable(ext)) return null
+        val leg = startOut(fromUser, ext, false, 101) ?: return null
+        val end = System.currentTimeMillis() + ringMs
+        while (leg.state < 2 && !leg.closed && System.currentTimeMillis() < end) delay(100)
+        if (leg.state != 2) {
+            sendCancel(leg)
+            srv.scope.launch { delay(4000); markClosed(leg) }
+            return null
+        }
+        return leg
+    }
+
+    /** While an extension is in a conference, queues / call-backs must not ring it. */
+    fun setBusy(ext: String, on: Boolean) { if (on) busy.add(ext) else busy.remove(ext) }
+
     // ------------------------------------------------------------ MSRP file delivery leg
 
     /** Originates an INVITE carrying [sdp] to [ext]; [onAnswer] gets the 200 OK's SDP. Returns the leg or null. */

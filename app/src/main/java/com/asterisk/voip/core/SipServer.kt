@@ -97,6 +97,7 @@ class SipServer(
     private var dialPlanExecutor: DialPlanExecutor? = null
     private val legs = LegManager(this)
     private val gateway = GatewayManager(this)
+    private val conferences = ConferenceManager(this)
     private var msrp: MsrpManager? = null
 
     // accessors for LegManager / MsrpManager (same module)
@@ -108,6 +109,7 @@ class SipServer(
     internal val executor: DialPlanExecutor? get() = dialPlanExecutor
     internal val prompts: VoicePromptManager? get() = voicePromptManager
     internal val legManager: LegManager get() = legs
+    internal val conference: ConferenceManager get() = conferences
     internal val repo: AsteriskRepository get() = repository
     internal val mediaRelay: MediaRelay? get() = relay
     @Volatile internal var storageDir: java.io.File = java.io.File("/data/local/tmp")
@@ -204,6 +206,7 @@ class SipServer(
         tcpConns.clear()
         relay?.stop()
         relay = null
+        conferences.stop()
         legs.stop()
         msrp?.stop()
         msrp = null
@@ -599,6 +602,24 @@ class SipServer(
             return
         }
 
+        // conference room (*80, *801, ...): the server mixes everybody's audio
+        if (inTrunk == null) {
+            val confRoom = conferences.roomFor(toExt)
+            if (confRoom != null && registered[toExt] == null && repository.getExtensionByNumber(toExt) == null) {
+                if (conferences.isFull(confRoom)) {
+                    log("CONF", "❌ Conference ${conferences.label(confRoom)} is full")
+                    reply(msg, 486, "Busy Here", ip, port); return
+                }
+                val cc = Call(id = callId, fromExt = fromExt, toExt = toExt, callerTag = msg.fromTag,
+                    callerIp = ip, callerPort = port, calleeIp = "", calleePort = 0, relayed = false, invite = msg.clone())
+                cc.inviteCSeq = msg.cseqNum
+                calls[callId] = cc
+                reply(msg, 100, "Trying", ip, port)
+                legs.runConference(cc, confRoom)
+                return
+            }
+        }
+
         // number that is not a local extension -> send it out through a gateway (SIP trunk)
         if (inTrunk == null && registered[toExt] == null && repository.getExtensionByNumber(toExt) == null) {
             if (gateway.startOutbound(msg, ip, port, fromExt, toExt)) return
@@ -698,7 +719,11 @@ class SipServer(
             val body = msg.body
             when {
                 body.contains("a=sendonly") || body.contains("a=inactive") -> { call.state = "HELD"; log("CALL", "⏸️ HOLD") }
-                body.contains("a=sendrecv") || body.isNotEmpty() -> { call.state = "CONNECTED"; log("CALL", "▶️ RESUME / media update") }
+                body.contains("a=sendrecv") || body.isNotEmpty() -> {
+                    call.state = "CONNECTED"
+                    relay?.session(call.id)?.lastActivity = System.currentTimeMillis() // media restarts after hold
+                    log("CALL", "▶️ RESUME / media update")
+                }
             }
             if (SdpUtil.hasVideo(body)) call.video = true
         }
@@ -1287,9 +1312,9 @@ class SipServer(
     fun retryTrunk(id: Long) = gateway.retryNow(id)
 
     fun getCalls(): List<CallInfo> = calls.values
-        .filter { it.state != "FAILED" && it.state != "CANCELLING" }
+        .filter { it.state != "FAILED" && it.state != "CANCELLING" && !it.toExt.startsWith("Conference ") }
         .sortedBy { it.time }
-        .map { CallInfo(it.id, it.fromExt, it.toExt, it.state, it.time, it.relayed, it.video, relay?.session(it.id)?.packets?.get() ?: 0L) } + gateway.callInfos()
+        .map { CallInfo(it.id, it.fromExt, it.toExt, it.state, it.time, it.relayed, it.video, relay?.session(it.id)?.packets?.get() ?: 0L) } + conferences.activeRooms() + gateway.callInfos()
 }
 
 /** Tiny IPv4 helpers. */

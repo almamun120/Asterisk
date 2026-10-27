@@ -1213,6 +1213,66 @@
                     android:background="@color/divider" />
 
                 <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/switch_conference"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="Conference rooms (server mixes the audio)" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Conference dial code"
+                    app:helperText="Dial this to join the main room. Add digits for more rooms (e.g. *80 and *801). Keys inside: *6 mute, *3 add an extension, *1 head count.">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_conf_code"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="phone"
+                        android:text="*80" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Max people per room">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_conf_max"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="10" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Conference PIN (empty = none)"
+                    app:helperText="Asked when someone dials in. People added with *3 are not asked.">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et_conf_pin"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberPassword" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@color/divider" />
+
+                <com.google.android.material.switchmaterial.SwitchMaterial
                     android:id="@+id/switch_record_calls"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

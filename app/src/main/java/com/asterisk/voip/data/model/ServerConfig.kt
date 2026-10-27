@@ -103,6 +103,13 @@ data class ServerConfig(
     val fileMaxSizeMb: Int = 20,
     val fileKeepDays: Int = 3,
 
+    // Conference rooms (server-side audio mixer)
+    // Dial the code to join: "*80" = main room, "*801", "*802" ... = other rooms.
+    val confEnabled: Boolean = true,
+    val confCode: String = "*80",
+    val confMaxMembers: Int = 10,
+    val confPin: String = "", // empty = no PIN
+
     // IVR (Interactive Voice Response)
     val ivrEnabled: Boolean = false,
     val ivrTimeout: Int = 10, // seconds

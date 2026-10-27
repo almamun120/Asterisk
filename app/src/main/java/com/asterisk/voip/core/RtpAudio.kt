@@ -10,11 +10,47 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 /**
+ * Thread-safe, bounded FIFO of decoded 8 kHz PCM. The RTP receive thread writes G.711 payloads,
+ * the conference mixer reads exactly one 20 ms frame per tick. Too much backlog (late burst of
+ * packets) is trimmed so the delay never grows.
+ */
+class PcmFifo(private val capacity: Int = G711.FRAME * 12) {
+    private val buf = ShortArray(capacity)
+    private var rd = 0
+    private var cnt = 0
+
+    @Synchronized fun write(src: ByteArray, off: Int, len: Int, alaw: Boolean) {
+        for (i in off until off + len) {
+            if (cnt == capacity) { rd = (rd + 1) % capacity; cnt-- } // overflow: drop oldest
+            buf[(rd + cnt) % capacity] = G711.decodeByte(src[i], alaw)
+            cnt++
+        }
+    }
+
+    /** Fills [dst] with the next samples. Returns false (and fills silence) when not enough audio is buffered yet. */
+    @Synchronized fun read(dst: ShortArray): Boolean {
+        val n = dst.size
+        if (cnt < n) { java.util.Arrays.fill(dst, 0.toShort()); return false }
+        for (i in 0 until n) { dst[i] = buf[rd]; rd = (rd + 1) % capacity }
+        cnt -= n
+        val keep = n * 2
+        if (cnt > n * 4) { // keep latency low: skip the oldest part of a burst
+            val drop = cnt - keep
+            rd = (rd + drop) % capacity; cnt -= drop
+        }
+        return true
+    }
+
+    @Synchronized fun clear() { rd = 0; cnt = 0 }
+}
+
+/**
  * One RTP audio stream terminated on the server itself (G.711 only).
  *
  *  - [playPcm] streams prompts to the far end with 20 ms pacing
  *  - [startRecording]/[stopRecording] capture what the far end says (voicemail)
  *  - RFC 2833 DTMF events are decoded into [dtmf]
+ *  - [mixIn] feeds the decoded audio to a conference mixer, [sendMixFrame] sends the mixed audio back
  *  - [bridge] forwards every received datagram to another RtpAudio, which turns two
  *    server-terminated legs into a normal two-party call (IVR / queue / callback)
  *
@@ -49,6 +85,8 @@ class RtpAudio private constructor(
     @Volatile var alaw = false
     @Volatile var dtmfPt = 101
     @Volatile var bridge: RtpAudio? = null
+    /** When set, received G.711 audio is decoded into this FIFO (conference mixer input). */
+    @Volatile var mixIn: PcmFifo? = null
     @Volatile var closed = false
     @Volatile var latched = false
     @Volatile var lastRxAt = System.currentTimeMillis()
@@ -120,6 +158,8 @@ class RtpAudio private constructor(
                     }
                     continue
                 }
+                val mi = mixIn
+                if (mi != null && (pt == 0 || pt == 8)) mi.write(buf, off, end - off, pt == 8)
                 val r = rec
                 if (r != null && (pt == 0 || pt == 8)) {
                     val a = pt == 8
@@ -135,6 +175,15 @@ class RtpAudio private constructor(
     fun sendRaw(data: ByteArray, len: Int) {
         val dst = remote ?: return
         try { socket.send(DatagramPacket(data, len, dst)) } catch (_: Exception) {}
+    }
+
+    /** Sends exactly one 20 ms frame (160 samples) of mixed audio. Used by one thread only (the conference mixer). */
+    fun sendMixFrame(pcm: ShortArray) {
+        if (closed) return
+        val data = G711.encode(pcm, alaw)
+        sendFrame(data, 0, G711.FRAME, false)
+        seq = (seq + 1) and 0xFFFF
+        ts = (ts + G711.FRAME) and 0xFFFFFFFFL
     }
 
     private fun sendFrame(payload: ByteArray, off: Int, n: Int, marker: Boolean) {

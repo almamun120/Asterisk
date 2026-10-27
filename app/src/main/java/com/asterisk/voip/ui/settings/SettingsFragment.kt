@@ -322,6 +322,10 @@ class SettingsFragment : Fragment() {
             switchCallForwarding.isChecked = config.callForwarding
             switchCallTransfer.isChecked = config.callTransfer
             switchCallParking.isChecked = config.callParking
+            switchConference.isChecked = config.confEnabled
+            etConfCode.setText(config.confCode)
+            etConfMax.setText(config.confMaxMembers.toString())
+            etConfPin.setText(config.confPin)
             switchRecordCalls.isChecked = config.callRecording
             spinnerRecordingFormat.setSelection(getRecordingFormatIndex(config.recordingFormat))
 
@@ -537,6 +541,10 @@ class SettingsFragment : Fragment() {
                 callForwarding = switchCallForwarding.isChecked,
                 callTransfer = switchCallTransfer.isChecked,
                 callParking = switchCallParking.isChecked,
+                confEnabled = switchConference.isChecked,
+                confCode = etConfCode.text.toString().trim().ifEmpty { "*80" },
+                confMaxMembers = (etConfMax.text.toString().toIntOrNull() ?: 10).coerceIn(2, 50),
+                confPin = etConfPin.text.toString().trim(),
                 callRecording = switchRecordCalls.isChecked,
                 recordingFormat = getRecordingFormatFromSpinner(),
 
